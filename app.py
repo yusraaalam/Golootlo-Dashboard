@@ -12,6 +12,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# ── PASSWORD PROTECTION ───────────────────────────────────────────────
+def check_password():
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.markdown("## 📊 Golootlo Analytics")
+        st.markdown("Enter the password to access the dashboard.")
+        pwd = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if pwd == "YusraAlam1515":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect password.")
+        st.stop()
+
+check_password()
+
 # ── STYLING ───────────────────────────────────────────────────────────
 st.markdown("""
 <style>
