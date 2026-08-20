@@ -126,14 +126,49 @@ st.markdown("""
 # ── DATA LOADING ──────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
 def load_data():
+    import requests
+
     files = {
         'scored':  ('1rk40X6Kqcntr5mk7eheZ0z7UdDfybT2Z', 'scored.csv'),
         'rfm':     ('1JfUQzr4_McBAHyYUko3rMbKuun70sV5N', 'rfm.csv'),
         'journey': ('17csRmvdOt8rn89Zx9zCclpyVoYIjqjXu', 'journey.csv'),
     }
+
+    def download_file(file_id, fname):
+        if os.path.exists(fname):
+            return
+        # Try gdown first
+        try:
+            gdown.download(
+                f'https://drive.google.com/uc?id={file_id}&export=download&confirm=t',
+                fname, quiet=True, fuzzy=True
+            )
+            if os.path.exists(fname) and os.path.getsize(fname) > 1000:
+                return
+        except Exception:
+            pass
+        # Fallback: requests with session
+        try:
+            session = requests.Session()
+            url = f'https://drive.google.com/uc?id={file_id}&export=download'
+            response = session.get(url, stream=True)
+            token = None
+            for key, value in response.cookies.items():
+                if key.startswith('download_warning'):
+                    token = value
+            if token:
+                url = f'{url}&confirm={token}'
+                response = session.get(url, stream=True)
+            with open(fname, 'wb') as f:
+                for chunk in response.iter_content(32768):
+                    if chunk:
+                        f.write(chunk)
+        except Exception as e:
+            st.error(f"Failed to download {fname}: {e}")
+            raise
+
     for key, (file_id, fname) in files.items():
-        if not os.path.exists(fname):
-            gdown.download(f'https://drive.google.com/uc?id={file_id}', fname, quiet=True)
+        download_file(file_id, fname)
 
     scored  = pd.read_csv('scored.csv',  low_memory=False)
     rfm     = pd.read_csv('rfm.csv',     low_memory=False)
