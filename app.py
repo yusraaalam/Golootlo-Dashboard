@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import gdown
+import psycopg2
+from sqlalchemy import create_engine, text
 import os
 from collections import Counter
 
@@ -16,7 +17,6 @@ st.set_page_config(
 def check_password():
     if 'authenticated' not in st.session_state:
         st.session_state.authenticated = False
-
     if not st.session_state.authenticated:
         st.markdown("## 📊 Golootlo Analytics")
         st.markdown("Enter the password to access the dashboard.")
@@ -35,187 +35,60 @@ check_password()
 st.markdown("""
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-  
   html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-  
   .main { background: #f8f9fa; }
-  
-  .metric-card {
-    background: #ffffff;
-    border: 1px solid #e8e8e8;
-    border-radius: 10px;
-    padding: 16px 20px;
-    text-align: center;
-  }
-  .metric-value {
-    font-size: 26px;
-    font-weight: 700;
-    color: #111;
-    line-height: 1.2;
-  }
-  .metric-label {
-    font-size: 11px;
-    color: #888;
-    margin-top: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .metric-sub {
-    font-size: 11px;
-    color: #aaa;
-    margin-top: 2px;
-  }
-  
   .section-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: #111;
-    margin: 24px 0 12px;
-    padding-bottom: 8px;
+    font-size: 15px; font-weight: 700; color: #111;
+    margin: 24px 0 12px; padding-bottom: 8px;
     border-bottom: 1px solid #e8e8e8;
   }
-  
-  .seg-champion  { color: #1a7a4a; font-weight: 700; }
-  .seg-loyal     { color: #0a4a8a; font-weight: 700; }
-  .seg-atrisk    { color: #b35900; font-weight: 700; }
-  .seg-new       { color: #3a2a9a; font-weight: 700; }
-  .seg-lost      { color: #8a1a1a; font-weight: 700; }
-  
-  .stSelectbox label { font-size: 12px; color: #555; }
-  .stTextInput label { font-size: 12px; color: #555; }
-  
   div[data-testid="metric-container"] {
-    background: #fff;
-    border: 1px solid #e8e8e8;
-    border-radius: 10px;
-    padding: 12px 16px;
-  }
-  
-  .table-container {
-    background: #fff;
-    border: 1px solid #e8e8e8;
-    border-radius: 10px;
-    overflow: hidden;
-    margin-bottom: 16px;
-  }
-  .table-header {
-    padding: 10px 16px;
-    border-bottom: 1px solid #eee;
-    font-size: 13px;
-    font-weight: 700;
-    color: #111;
-  }
-  
-  .customer-card {
-    background: #fff;
-    border: 1px solid #e8e8e8;
-    border-radius: 10px;
-    overflow: hidden;
-    margin-bottom: 16px;
-  }
-  .customer-header {
-    padding: 14px 18px;
-    border-bottom: 1px solid #eee;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+    background: #fff; border: 1px solid #e8e8e8;
+    border-radius: 10px; padding: 12px 16px;
   }
 </style>
 """, unsafe_allow_html=True)
 
-# ── DATA LOADING ──────────────────────────────────────────────────────
-@st.cache_data(show_spinner=False)
+# ── DATABASE CONNECTION ───────────────────────────────────────────────
+DB_URL = "postgresql+psycopg2://postgres.sbhvdjuxasqkjrxdvmcy:YusraAlam1515@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+
+@st.cache_resource
+def get_engine():
+    return create_engine(DB_URL, connect_args={"sslmode": "require"})
+
+@st.cache_data(show_spinner="Loading data...")
 def load_data():
-    import requests
-
-    files = {
-        'scored':  ('1xmZY11y_M24-1RlGE0M-CDl9kLUi76TE', 'scored.csv'),
-        'rfm':     ('1JfUQzr4_McBAHyYUko3rMbKuun70sV5N', 'rfm.csv'),
-        'journey': ('17csRmvdOt8rn89Zx9zCclpyVoYIjqjXu', 'journey.csv'),
-    }
-
-    def download_file(file_id, fname):
-        if os.path.exists(fname):
-            return
-        # Try gdown first
-        try:
-            gdown.download(
-                f'https://drive.google.com/uc?id={file_id}&export=download&confirm=t',
-                fname, quiet=True, fuzzy=True
-            )
-            if os.path.exists(fname) and os.path.getsize(fname) > 1000:
-                return
-        except Exception:
-            pass
-        # Fallback: requests with session
-        try:
-            session = requests.Session()
-            url = f'https://drive.google.com/uc?id={file_id}&export=download'
-            response = session.get(url, stream=True)
-            token = None
-            for key, value in response.cookies.items():
-                if key.startswith('download_warning'):
-                    token = value
-            if token:
-                url = f'{url}&confirm={token}'
-                response = session.get(url, stream=True)
-            with open(fname, 'wb') as f:
-                for chunk in response.iter_content(32768):
-                    if chunk:
-                        f.write(chunk)
-        except Exception as e:
-            st.error(f"Failed to download {fname}: {e}")
-            raise
-
-    for key, (file_id, fname) in files.items():
-        download_file(file_id, fname)
-
-    scored  = pd.read_csv('scored.csv',  low_memory=False)
-    rfm     = pd.read_csv('rfm.csv',     low_memory=False)
-    journey = pd.read_csv('journey.csv', low_memory=False)
-
+    engine = get_engine()
+    scored  = pd.read_sql("SELECT * FROM scored",  engine)
+    rfm     = pd.read_sql("SELECT * FROM rfm",     engine)
+    journey = pd.read_sql("SELECT * FROM journey", engine)
     scored['DATE'] = pd.to_datetime(scored['DATE'], errors='coerce')
     return scored, rfm, journey
 
-with st.spinner("Loading Golootlo data..."):
+with st.spinner("Connecting to database..."):
     df, rfm, journey = load_data()
 
 rs199_phones = set(rfm[rfm['IS_RS199'] == True]['MASTER_ID'].astype(str).tolist()) if 'IS_RS199' in rfm.columns else set()
 
-# ── SEGMENT STYLING ───────────────────────────────────────────────────
+# ── SEGMENT COLORS ────────────────────────────────────────────────────
 SEG_COLORS = {
-    'Champion': '#1a7a4a',
-    'Loyal':    '#0a4a8a',
-    'At Risk':  '#b35900',
-    'New':      '#3a2a9a',
-    'Lost':     '#8a1a1a',
+    'Champion': '#1a7a4a', 'Loyal': '#0a4a8a',
+    'At Risk':  '#b35900', 'New':   '#3a2a9a', 'Lost': '#8a1a1a',
 }
 CH_COLORS = {
-    'Instore':  '#2E86AB',
-    'Delivery': '#A23B72',
-    'Ecom':     '#F18F01',
+    'Instore': '#2E86AB', 'Delivery': '#A23B72', 'Ecom': '#F18F01',
 }
-
-def seg_badge(seg):
-    color = SEG_COLORS.get(seg, '#555')
-    return f'<span style="color:{color};font-weight:700;">{seg}</span>'
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## 📊 Golootlo Analytics")
     st.markdown("**Jan – Jul 2026**")
     st.markdown("---")
-
     page = st.radio("Navigate", [
-        "Overview",
-        "Segments",
-        "Channel Journey",
-        "Category Analysis",
-        "City Analysis",
-        "Brand Affinity",
-        "Customer Lookup",
+        "Overview", "Segments", "Channel Journey",
+        "Category Analysis", "City Analysis",
+        "Brand Affinity", "Customer Lookup",
     ])
-
     st.markdown("---")
     st.markdown(f"**{df['MASTER_ID'].nunique():,}** customers")
     st.markdown(f"**{len(df):,}** transactions")
@@ -229,32 +102,27 @@ if page == "Overview":
     st.markdown("Jan 1 – Jul 31, 2026")
 
     c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        st.metric("Total Customers", f"{df['MASTER_ID'].nunique():,}")
-    with c2:
-        st.metric("Total Transactions", f"{len(df):,}")
-    with c3:
-        st.metric("Unique Brands", f"{df['BRAND_CLEAN'].nunique():,}")
+    with c1: st.metric("Total Customers", f"{df['MASTER_ID'].nunique():,}")
+    with c2: st.metric("Total Transactions", f"{len(df):,}")
+    with c3: st.metric("Unique Brands", f"{df['BRAND_CLEAN'].nunique():,}")
     with c4:
-        delivery_spend = df[df['CHANNEL'] == 'Delivery']['AMOUNT'].sum()
-        st.metric("Total Delivery Spend", f"PKR {delivery_spend:,.0f}")
-    with c5:
-        st.metric("Rs.199 Users", f"{len(rs199_phones):,}")
+        spend = df[df['CHANNEL'] == 'Delivery']['AMOUNT'].sum()
+        st.metric("Total Delivery Spend", f"PKR {spend:,.0f}")
+    with c5: st.metric("Rs.199 Users", f"{len(rs199_phones):,}")
 
     st.markdown('<div class="section-title">Channel Breakdown</div>', unsafe_allow_html=True)
-    ch_data = df.groupby('CHANNEL').agg(
-        Transactions=('MASTER_ID','count'),
-        Customers=('MASTER_ID','nunique')
-    ).reset_index().sort_values('Transactions', ascending=False)
-
     col1, col2 = st.columns(2)
     with col1:
-        st.dataframe(ch_data, use_container_width=True, hide_index=True)
+        ch = df.groupby('CHANNEL').agg(
+            Transactions=('MASTER_ID','count'),
+            Customers=('MASTER_ID','nunique')
+        ).reset_index().sort_values('Transactions', ascending=False)
+        st.dataframe(ch, use_container_width=True, hide_index=True)
     with col2:
-        seg_data = rfm['Segment'].value_counts().reset_index()
-        seg_data.columns = ['Segment', 'Customers']
-        seg_data['%'] = (seg_data['Customers'] / seg_data['Customers'].sum() * 100).round(1)
-        st.dataframe(seg_data, use_container_width=True, hide_index=True)
+        seg = rfm['Segment'].value_counts().reset_index()
+        seg.columns = ['Segment', 'Customers']
+        seg['%'] = (seg['Customers']/seg['Customers'].sum()*100).round(1)
+        st.dataframe(seg, use_container_width=True, hide_index=True)
 
     st.markdown('<div class="section-title">Monthly Transaction Trend</div>', unsafe_allow_html=True)
     monthly = df.groupby(['YEAR','MONTH_NUM','MONTH_NAME']).size().reset_index(name='Transactions')
@@ -278,7 +146,6 @@ elif page == "Segments":
 
     seg_counts = rfm['Segment'].value_counts()
     total = seg_counts.sum()
-
     rows_html = ''
     for seg, (who, action) in seg_info.items():
         count = int(seg_counts.get(seg, 0))
@@ -307,32 +174,26 @@ elif page == "Segments":
         <span style="font-size:11px;color:#aaa;margin-left:8px;">{total:,} total customers</span>
       </div>
       <table style="width:100%;border-collapse:collapse;font-family:Inter,sans-serif;">
-        <thead>
-          <tr style="background:#fafafa;border-bottom:1px solid #eee;">
-            <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">SEGMENT</th>
-            <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">COUNT</th>
-            <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">WHO THEY ARE</th>
-            <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">WHAT TO DO</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#fafafa;border-bottom:1px solid #eee;">
+          <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">SEGMENT</th>
+          <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">COUNT</th>
+          <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">WHO THEY ARE</th>
+          <th style="padding:8px 14px;text-align:left;font-size:11px;color:#888;font-weight:600;">WHAT TO DO</th>
+        </tr></thead>
         <tbody>{rows_html}</tbody>
       </table>
     </div>''', unsafe_allow_html=True)
 
     st.markdown('<div class="section-title">Channel Breakdown by Segment</div>', unsafe_allow_html=True)
-
-    df_seg = df.merge(rfm[['MASTER_ID','Segment']], on='MASTER_ID', how='left')
-    ch_seg = df_seg.groupby(['Segment','CHANNEL']).size().unstack(fill_value=0)
+    ch_seg = df.groupby(['Segment','CHANNEL']).size().unstack(fill_value=0)
     ch_seg['Total'] = ch_seg.sum(axis=1)
     ch_pct = ch_seg.div(ch_seg['Total'], axis=0).drop(columns='Total') * 100
     ch_pct = ch_pct.round(1)
-
     channels = [c for c in ch_seg.columns if c != 'Total']
     rows2 = ''
     for seg in ch_seg.index:
         color = SEG_COLORS.get(seg, '#555')
         cells = ''
-        total_seg = int(ch_seg.loc[seg,'Total'])
         for ch in channels:
             count = int(ch_seg.loc[seg, ch]) if ch in ch_seg.columns else 0
             pct   = float(ch_pct.loc[seg, ch]) if ch in ch_pct.columns else 0
@@ -340,20 +201,17 @@ elif page == "Segments":
         rows2 += f'''<tr style="border-bottom:1px solid #f0f0f0;">
             <td style="padding:7px 12px;font-weight:700;color:{color};font-size:13px;">{seg}</td>
             {cells}
-            <td style="padding:7px 12px;text-align:center;font-weight:700;font-size:12px;">{total_seg:,}</td>
+            <td style="padding:7px 12px;text-align:center;font-weight:700;font-size:12px;">{int(ch_seg.loc[seg,"Total"]):,}</td>
         </tr>'''
-
-    header_cols = ''.join([f'<th style="padding:7px 12px;text-align:center;font-size:11px;color:#888;font-weight:600;">{c.upper()}</th>' for c in channels])
+    hcols = ''.join([f'<th style="padding:7px 12px;text-align:center;font-size:11px;color:#888;font-weight:600;">{c.upper()}</th>' for c in channels])
     st.markdown(f'''
     <div style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;overflow:hidden;">
       <table style="width:100%;border-collapse:collapse;font-family:Inter,sans-serif;">
-        <thead>
-          <tr style="background:#fafafa;border-bottom:1px solid #eee;">
-            <th style="padding:7px 12px;text-align:left;font-size:11px;color:#888;font-weight:600;">SEGMENT</th>
-            {header_cols}
-            <th style="padding:7px 12px;text-align:center;font-size:11px;color:#888;font-weight:600;">TOTAL</th>
-          </tr>
-        </thead>
+        <thead><tr style="background:#fafafa;border-bottom:1px solid #eee;">
+          <th style="padding:7px 12px;text-align:left;font-size:11px;color:#888;font-weight:600;">SEGMENT</th>
+          {hcols}
+          <th style="padding:7px 12px;text-align:center;font-size:11px;color:#888;font-weight:600;">TOTAL</th>
+        </tr></thead>
         <tbody>{rows2}</tbody>
       </table>
     </div>''', unsafe_allow_html=True)
@@ -366,7 +224,7 @@ elif page == "Channel Journey":
 
     j_counts = journey['Channel_Journey'].value_counts().reset_index()
     j_counts.columns = ['Journey Path','Customers']
-    j_counts['%'] = (j_counts['Customers'] / j_counts['Customers'].sum() * 100).round(1)
+    j_counts['%'] = (j_counts['Customers']/j_counts['Customers'].sum()*100).round(1)
 
     def classify(p):
         if '→' not in str(p): return 'Single Channel', '#888'
@@ -376,15 +234,15 @@ elif page == "Channel Journey":
     j_counts['Type']  = j_counts['Journey Path'].apply(lambda x: classify(x)[0])
     j_counts['Color'] = j_counts['Journey Path'].apply(lambda x: classify(x)[1])
 
-    total = j_counts['Customers'].sum()
+    total  = j_counts['Customers'].sum()
     single = j_counts[j_counts['Type']=='Single Channel']['Customers'].sum()
     two    = j_counts[j_counts['Type']=='Two Channel']['Customers'].sum()
     multi  = j_counts[j_counts['Type']=='Full Multichannel']['Customers'].sum()
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1,c2,c3,c4 = st.columns(4)
     c1.metric("Total Customers", f"{total:,}")
-    c2.metric("Single Channel", f"{single:,}")
-    c3.metric("Two Channel", f"{two:,}")
+    c2.metric("Single Channel",  f"{single:,}")
+    c3.metric("Two Channel",     f"{two:,}")
     c4.metric("Full Multichannel", f"{multi:,}")
 
     max_c = j_counts['Customers'].max()
@@ -424,25 +282,13 @@ elif page == "Channel Journey":
 elif page == "Category Analysis":
     st.markdown("## Category Analysis")
 
-    df_cat = df.merge(rfm[['MASTER_ID','Segment']], on='MASTER_ID', how='left')
-
-    def clean_cat(cat):
-        cat = str(cat).strip()
-        if 'GOLOOTLO EXCLUSIVE' in cat.upper(): return 'Golootlo Exclusive'
-        if any(x in cat.upper() for x in ['CLASSIC PIZZA','DELUXE PIZZA','PREMIUM PIZZA']): return 'Food'
-        if 'RAMADAN' in cat.upper(): return 'Golootlo Exclusive'
-        return cat
-
-    if 'CATEGORY_CLEAN' not in df_cat.columns:
-        df_cat['CATEGORY_CLEAN'] = df_cat['CATEGORY'].apply(clean_cat)
-
-    cat_total = df_cat.groupby('CATEGORY_CLEAN').agg(
+    cat_total = df.groupby('CATEGORY_CLEAN').agg(
         Transactions=('MASTER_ID','count'),
         Customers=('MASTER_ID','nunique'),
         Top_Segment=('Segment', lambda x: x.value_counts().index[0] if x.notna().any() else '—')
     ).reset_index()
 
-    cat_ch = df_cat.groupby(['CATEGORY_CLEAN','CHANNEL']).agg(
+    cat_ch = df.groupby(['CATEGORY_CLEAN','CHANNEL']).agg(
         C=('MASTER_ID','nunique')
     ).reset_index().pivot_table(
         index='CATEGORY_CLEAN', columns='CHANNEL', values='C', fill_value=0
@@ -461,17 +307,17 @@ elif page == "Category Analysis":
     rows = ''
     for _, row in cat_total.iterrows():
         seg_color = SEG_COLORS.get(row['Top_Segment'], '#555')
-        ins  = int(row.get('Instore', 0))
-        dlv  = int(row.get('Delivery', 0))
-        eco  = int(row.get('Ecom', 0))
-        tot  = ins + dlv + eco or 1
+        ins = int(row.get('Instore', 0))
+        dlv = int(row.get('Delivery', 0))
+        eco = int(row.get('Ecom', 0))
+        tot = ins + dlv + eco or 1
 
         def bar(val, color):
             w = int(val/tot*50)
             p = round(val/tot*100)
             return f'<div style="display:flex;align-items:center;gap:3px;margin-bottom:2px;"><div style="width:{w}px;min-width:2px;height:5px;background:{color};border-radius:2px;"></div><span style="font-size:10px;color:#888;">{val:,} ({p}%)</span></div>'
 
-        brands = df_cat[(df_cat['CATEGORY_CLEAN']==row['CATEGORY_CLEAN']) & df_cat['BRAND_CLEAN'].notna()]['BRAND_CLEAN'].value_counts().head(4)
+        brands = df[(df['CATEGORY_CLEAN']==row['CATEGORY_CLEAN']) & df['BRAND_CLEAN'].notna()]['BRAND_CLEAN'].value_counts().head(4)
         brand_str = ' · '.join(brands.index.tolist()) if len(brands) > 0 else '—'
 
         rows += f'''<tr style="border-bottom:1px solid #f0f0f0;vertical-align:top;">
@@ -516,16 +362,14 @@ elif page == "Category Analysis":
 elif page == "City Analysis":
     st.markdown("## City Analysis")
 
-    df_city = df.merge(rfm[['MASTER_ID','Segment']], on='MASTER_ID', how='left')
-
-    city_total = df_city.groupby('CITY').agg(
+    city_total = df.groupby('CITY').agg(
         Transactions=('MASTER_ID','count'),
         Customers=('MASTER_ID','nunique'),
         Top_Channel=('CHANNEL', lambda x: x.value_counts().index[0]),
         Top_Segment=('Segment', lambda x: x.value_counts().index[0] if x.notna().any() else '—')
     ).reset_index()
 
-    city_ch = df_city.groupby(['CITY','CHANNEL']).agg(
+    city_ch = df.groupby(['CITY','CHANNEL']).agg(
         C=('MASTER_ID','nunique')
     ).reset_index().pivot_table(
         index='CITY', columns='CHANNEL', values='C', fill_value=0
@@ -546,10 +390,10 @@ elif page == "City Analysis":
     for _, row in city_total.iterrows():
         seg_color = SEG_COLORS.get(row['Top_Segment'], '#555')
         ch_color  = CH_COLORS.get(row['Top_Channel'], '#555')
-        ins  = int(row.get('Instore', 0))
-        dlv  = int(row.get('Delivery', 0))
-        eco  = int(row.get('Ecom', 0))
-        tot  = ins + dlv + eco or 1
+        ins = int(row.get('Instore', 0))
+        dlv = int(row.get('Delivery', 0))
+        eco = int(row.get('Ecom', 0))
+        tot = ins + dlv + eco or 1
 
         def bar(val, color):
             w = int(val/tot*50)
@@ -629,12 +473,13 @@ elif page == "Brand Affinity":
                     break
 
     next_df = pd.DataFrame(Counter(next_brands).most_common(5), columns=['Brand','Users'])
-    next_df['%'] = (next_df['Users']/len(brand_users)*100).round(1)
+    if len(next_df) > 0:
+        next_df['%'] = (next_df['Users']/len(brand_users)*100).round(1)
 
-    c1, c2, c3 = st.columns(3)
+    c1,c2,c3 = st.columns(3)
     c1.metric("Total Customers", f"{len(brand_users):,}")
     c2.metric("Also Use Another Brand", f"{also_use['Users'].iloc[0]:,}" if len(also_use) > 0 else "—")
-    c3.metric("Move to Another Brand Next", f"{next_df['Users'].iloc[0]:,}" if len(next_df) > 0 else "—")
+    c3.metric("Next Brand After First Visit", f"{next_df['Users'].iloc[0]:,}" if len(next_df) > 0 else "—")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -655,7 +500,6 @@ elif page == "Customer Lookup":
     if phone:
         phone = str(phone).strip()
         customer_df = df[
-            (df['PHONE'].astype(str).str.strip() == phone) |
             (df['MASTER_ID'].astype(str).str.strip() == phone)
         ].copy().sort_values('DATE')
 
@@ -678,7 +522,6 @@ elif page == "Customer Lookup":
             cat_journey = journey_row['Category_Journey'].values[0] if not journey_row.empty else '—'
             top_brand   = journey_row['Top_Brand'].values[0] if not journey_row.empty else '—'
             top_cat     = journey_row['Top_Category'].values[0] if not journey_row.empty else '—'
-            name        = str(customer_df['CUSTOMER_NAME'].dropna().iloc[0]) if not customer_df['CUSTOMER_NAME'].dropna().empty else '—'
             city        = str(customer_df['CITY'].dropna().iloc[0]) if not customer_df['CITY'].dropna().empty else '—'
             first_date  = customer_df['DATE'].min().strftime('%d %b %Y')
             last_date   = customer_df['DATE'].max().strftime('%d %b %Y')
@@ -689,8 +532,8 @@ elif page == "Customer Lookup":
             <div style="background:#fff;border:1px solid #e8e8e8;border-radius:10px;overflow:hidden;margin-bottom:16px;">
               <div style="padding:14px 18px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;">
                 <div>
-                  <span style="font-size:16px;font-weight:700;color:#111;">{name}</span>
-                  <span style="font-size:12px;color:#888;margin-left:8px;">{phone} · {city}</span>
+                  <span style="font-size:16px;font-weight:700;color:#111;">{phone}</span>
+                  <span style="font-size:12px;color:#888;margin-left:8px;">{city}</span>
                   <span style="font-size:12px;color:#856404;margin-left:8px;">{rs199_badge}</span>
                 </div>
                 <span style="font-size:15px;font-weight:700;color:{seg_color};">{segment}</span>
@@ -736,8 +579,8 @@ elif page == "Customer Lookup":
             </div>''', unsafe_allow_html=True)
 
             st.markdown("**Last 10 Transactions**")
-            tx_display = customer_df[['DATE','CHANNEL','BRAND_CLEAN','CATEGORY_CLEAN','AMOUNT']].tail(10).iloc[::-1].copy()
-            tx_display['DATE'] = tx_display['DATE'].dt.strftime('%d %b %Y')
-            tx_display['AMOUNT'] = tx_display['AMOUNT'].apply(lambda x: f"PKR {int(x):,}" if pd.notna(x) and x > 0 else '—')
-            tx_display.columns = ['Date','Channel','Brand','Category','Amount']
-            st.dataframe(tx_display, use_container_width=True, hide_index=True)
+            tx = customer_df[['DATE','CHANNEL','BRAND_CLEAN','CATEGORY_CLEAN','AMOUNT']].tail(10).iloc[::-1].copy()
+            tx['DATE'] = tx['DATE'].dt.strftime('%d %b %Y')
+            tx['AMOUNT'] = tx['AMOUNT'].apply(lambda x: f"PKR {int(x):,}" if pd.notna(x) and x > 0 else '—')
+            tx.columns = ['Date','Channel','Brand','Category','Amount']
+            st.dataframe(tx, use_container_width=True, hide_index=True)
