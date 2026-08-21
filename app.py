@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import psycopg2
 from sqlalchemy import create_engine, text
 import os
 from collections import Counter
