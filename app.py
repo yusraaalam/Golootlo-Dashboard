@@ -67,10 +67,11 @@ def load_data():
     bc      = pd.read_sql("SELECT * FROM brand_city",    engine)
     rs199p  = pd.read_sql("SELECT * FROM rs199_products",engine)
     subs    = pd.read_sql("SELECT * FROM subscriptions", engine)
+    aff     = pd.read_sql("SELECT * FROM brand_affinity",engine)
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    return df, rfm, journey, bc, rs199p, subs
+    return df, rfm, journey, bc, rs199p, subs, aff
 
-df, rfm, journey, brand_city, rs199_prod, subs = load_data()
+df, rfm, journey, brand_city, rs199_prod, subs, affinity_db = load_data()
 
 # Merge segment into df
 df = df.merge(rfm[['MASTER_ID','Segment']], on='MASTER_ID', how='left')
@@ -109,11 +110,6 @@ PLOTLY_LAYOUT = dict(
 def gc(fig, height=300):
     fig.update_layout(**PLOTLY_LAYOUT, height=height)
     st.plotly_chart(fig, use_container_width=True, config={'displayModeBar':False})
-
-def seg_pill(seg):
-    c = SEG_COLORS.get(seg,'#a0aec0')
-    b = SEG_BG.get(seg,'#1a1d2e')
-    return f'<span style="background:{b};color:{c};padding:4px 12px;border-radius:6px;font-size:13px;font-weight:500;">{seg}</span>'
 
 with st.sidebar:
     st.markdown(f"<div style='padding:8px 0 16px;'><span style='font-size:18px;font-weight:700;color:#f0f4f8;'>Golootlo Analytics</span><br><span style='font-size:12px;color:#718096;'>Jan – Aug 2026</span></div>", unsafe_allow_html=True)
@@ -226,8 +222,8 @@ elif page == "RFM Segments":
 
     seg_info = {
         'Super Fan': ('10+ transactions/month. Most engaged users.', 'VIP treatment. Exclusive access. Make them brand advocates.'),
-        'Fan':       ('5–10 transactions/month. Highly active.',      'Reward consistency. Push toward Super Fan.'),
-        'Loyal':     ('3–5 transactions/month. Solid core base.',     'Personalised offers based on favourite brand or category.'),
+        'Fan':       ('5-10 transactions/month. Highly active.',      'Reward consistency. Push toward Super Fan.'),
+        'Loyal':     ('3-5 transactions/month. Solid core base.',     'Personalised offers based on favourite brand or category.'),
         'At Risk':   ('Going quiet. Was active, now slowing down.',   'Win-back campaign urgently. Time-sensitive offer.'),
         'New':       ('Just joined. Seen recently, low transactions.','Nurture fast. Second visit within 7 days is critical.'),
         'Lost':      ('Less than 2 tx/month. Not seen recently.',     'One reactivation push only. Then write off.'),
@@ -280,7 +276,6 @@ elif page == "RFM Segments":
                      orientation='h', color='Segment', color_discrete_map=SEG_COLORS)
         fig.update_traces(marker_line_width=0)
         gc(fig,300)
-
     with col2:
         ch_seg = df.groupby(['Segment','CHANNEL']).size().unstack(fill_value=0).reset_index()
         ch_cols = [c for c in ['Instore','Delivery','Ecom'] if c in ch_seg.columns]
@@ -288,22 +283,17 @@ elif page == "RFM Segments":
         fig2.update_traces(marker_line_width=0)
         gc(fig2,300)
 
-    # Rs.199 by segment
-    st.markdown("<div class='g-section'>Rs.199 usage by segment</div>", unsafe_allow_html=True)
+    st.markdown("<div class='g-section'>Rs.199 usage & subscriptions by segment</div>", unsafe_allow_html=True)
     col3,col4 = st.columns(2)
     with col3:
         rs199_seg = rfm.groupby('Segment')['IS_RS199'].sum().reset_index()
         rs199_seg.columns=['Segment','Rs199_Users']
-        rs199_seg['Total'] = rs199_seg['Segment'].map(seg_counts)
-        rs199_seg['%'] = (rs199_seg['Rs199_Users']/rs199_seg['Total']*100).round(1)
         fig3 = px.bar(rs199_seg.sort_values('Rs199_Users'), x='Rs199_Users', y='Segment',
                       orientation='h', color='Segment', color_discrete_map=SEG_COLORS,
                       title="Rs.199 users per segment")
         fig3.update_traces(marker_line_width=0)
         gc(fig3,280)
-
     with col4:
-        # Subscriptions by segment
         if len(subs)>0:
             sub_phones = set(subs['User_Number'].dropna().astype(str).str.replace('.0','').str.strip().unique())
             rfm['Is_Subscriber'] = rfm['MASTER_ID'].astype(str).isin(sub_phones)
@@ -341,8 +331,7 @@ elif page == "Brand Affinity":
                                           default=[all_brands[0]] if all_brands else [],
                                           max_selections=3)
 
-    # Overview chart — top 5 brands + their top 3 affinities
-    st.markdown("<div class='g-section'>Top 5 brands overview — click a brand to explore</div>", unsafe_allow_html=True)
+    st.markdown("<div class='g-section'>Top 5 brands by volume</div>", unsafe_allow_html=True)
     top5 = df_v['BRAND_CLEAN'].value_counts().dropna().head(5).reset_index()
     top5.columns=['Brand','Transactions']
     fig_ov = px.bar(top5.sort_values('Transactions'), x='Transactions', y='Brand',
@@ -353,89 +342,58 @@ elif page == "Brand Affinity":
     if not selected_brands:
         st.info("Select up to 3 brands above to see detailed affinity.")
     else:
-        user_tx_map = (
-            df_v[df_v['BRAND_CLEAN'].notna()].sort_values('DATE')
-            .groupby('MASTER_ID')['BRAND_CLEAN'].apply(list).to_dict()
-        )
-
         for brand in selected_brands:
-            brand_users = set(df_v[df_v['BRAND_CLEAN']==brand]['MASTER_ID'].unique())
+            brand_aff = affinity_db[(affinity_db['Brand']==brand) & (affinity_db['Channel']==vertical)]
+            also_use  = brand_aff[brand_aff['Type']=='also_use'].sort_values('Rank')[['Related_Brand','Users']]
+            next_brand = brand_aff[brand_aff['Type']=='next_brand'].sort_values('Rank')[['Related_Brand','Users']]
+            if len(next_brand)>0:
+                next_brand = next_brand.copy()
+                next_brand['%'] = (next_brand['Users']/next_brand['Users'].sum()*100).round(1)
 
-            also_use = df_v[
-                (df_v['MASTER_ID'].isin(brand_users)) &
-                (df_v['BRAND_CLEAN']!=brand) &
-                (df_v['BRAND_CLEAN'].notna())
-            ]['BRAND_CLEAN'].value_counts().head(8).reset_index()
-            also_use.columns=['Brand','Users']
-
-            next_b = []
-            for u in brand_users:
-                tx = user_tx_map.get(u,[])
-                if brand in tx:
-                    idx = tx.index(brand)
-                    for b in tx[idx+1:]:
-                        if b != brand: next_b.append(b); break
-            next_df = pd.DataFrame(Counter(next_b).most_common(8), columns=['Brand','Users'])
-            if len(next_df)>0: next_df['%']=(next_df['Users']/len(brand_users)*100).round(1)
-
-            bc_row = brand_city[brand_city['BRAND_CLEAN']==brand]
+            bc_row   = brand_city[brand_city['BRAND_CLEAN']==brand]
             cities_n = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else '—'
-
-            # If brand exists on multiple channels, show split
             brand_channels = df[df['BRAND_CLEAN']==brand]['CHANNEL'].unique().tolist()
-            channel_note = f" · Present on: {', '.join(brand_channels)}" if len(brand_channels)>1 else f" · {vertical} only"
+            channel_note = f" · Present on: {', '.join(brand_channels)}"
 
             st.markdown(f"<div class='g-section'>{brand}{channel_note}</div>", unsafe_allow_html=True)
             c1,c2,c3 = st.columns(3)
-            c1.metric("Unique Customers",   f"{len(brand_users):,}")
+            c1.metric("Unique Customers",   f"{df_v[df_v['BRAND_CLEAN']==brand]['MASTER_ID'].nunique():,}")
             c2.metric("Cities Present",     f"{cities_n}")
-            c3.metric("Move to Next Brand", f"{int(next_df['Users'].iloc[0]):,}" if len(next_df)>0 else "—")
+            c3.metric("Move to Next Brand", f"{int(next_brand['Users'].iloc[0]):,}" if len(next_brand)>0 else "—")
 
             col1,col2 = st.columns(2)
             with col1:
                 if len(also_use)>0:
-                    also_top3 = also_use.head(3)
-                    fig = px.bar(also_use.sort_values('Users'), x='Users', y='Brand',
+                    fig = px.bar(also_use.sort_values('Users'), x='Users', y='Related_Brand',
                                  orientation='h', title="Customers also use",
                                  color_discrete_sequence=[BLUE])
                     fig.update_traces(marker_line_width=0)
-                    # Highlight top 3
-                    colors = [BLUE if b in also_top3['Brand'].tolist() else '#1e2235' for b in also_use.sort_values('Users')['Brand']]
-                    fig.update_traces(marker_color=colors)
-                    gc(fig,300)
-
+                    gc(fig,280)
             with col2:
-                if len(next_df)>0:
-                    fig2 = px.bar(next_df.sort_values('Users'), x='Users', y='Brand',
+                if len(next_brand)>0:
+                    fig2 = px.bar(next_brand.sort_values('Users'), x='Users', y='Related_Brand',
                                   orientation='h', title="Next brand after first visit",
                                   color_discrete_sequence=['#2dd4a0'])
                     fig2.update_traces(marker_line_width=0)
-                    gc(fig2,300)
+                    gc(fig2,280)
 
-            # If brand on multiple channels, show channel-specific affinity
-            if len(brand_channels)>1 and vertical == "All":
+            if len(brand_channels)>1 and vertical=="All":
                 st.markdown(f"<div class='g-section'>{brand} — affinity by channel</div>", unsafe_allow_html=True)
                 ch_cols_display = st.columns(len(brand_channels))
-                for ci, ch in enumerate(brand_channels):
-                    df_ch = df[df['CHANNEL']==ch]
-                    ch_users = set(df_ch[df_ch['BRAND_CLEAN']==brand]['MASTER_ID'].unique())
-                    ch_next = []
-                    ch_tx_map = (df_ch[df_ch['BRAND_CLEAN'].notna()].sort_values('DATE')
-                                 .groupby('MASTER_ID')['BRAND_CLEAN'].apply(list).to_dict())
-                    for u in ch_users:
-                        tx = ch_tx_map.get(u,[])
-                        if brand in tx:
-                            idx = tx.index(brand)
-                            for b in tx[idx+1:]:
-                                if b != brand: ch_next.append(b); break
-                    ch_next_df = pd.DataFrame(Counter(ch_next).most_common(5), columns=['Brand','Users'])
+                for ci,ch in enumerate(brand_channels):
+                    ch_aff = affinity_db[
+                        (affinity_db['Brand']==brand) &
+                        (affinity_db['Channel']==ch) &
+                        (affinity_db['Type']=='next_brand')
+                    ].sort_values('Rank')
+                    ch_users = df[(df['CHANNEL']==ch) & (df['BRAND_CLEAN']==brand)]['MASTER_ID'].nunique()
                     with ch_cols_display[ci]:
-                        st.markdown(f"<p style='font-size:12px;color:{CH_COLORS.get(ch,BLUE)};font-weight:500;'>{ch} ({len(ch_users):,} users)</p>", unsafe_allow_html=True)
-                        if len(ch_next_df)>0:
-                            fig_ch = px.bar(ch_next_df.sort_values('Users'), x='Users', y='Brand',
+                        st.markdown(f"<p style='font-size:12px;color:{CH_COLORS.get(ch,BLUE)};font-weight:500;'>{ch} ({ch_users:,} users)</p>", unsafe_allow_html=True)
+                        if len(ch_aff)>0:
+                            fig_ch = px.bar(ch_aff.sort_values('Users'), x='Users', y='Related_Brand',
                                             orientation='h', color_discrete_sequence=[CH_COLORS.get(ch,BLUE)])
                             fig_ch.update_traces(marker_line_width=0)
-                            gc(fig_ch, 220)
+                            gc(fig_ch,220)
 
             st.markdown("<div class='g-divider'></div>", unsafe_allow_html=True)
 
@@ -446,11 +404,13 @@ elif page == "Rs.199 Recommender":
     st.markdown("## Next Rs.199 Campaign Recommender")
     st.markdown("<p class='g-caption'>Instore only · Food category · Scored on brand affinity + city coverage + platform scale</p>", unsafe_allow_html=True)
 
-    st.markdown("<div class='disclaimer'>⚠️ KFC is excluded from recommendations as it is the dominant platform brand and would always rank first. Recommendations focus on brands with strong natural affinity and growth potential.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='disclaimer'>KFC is excluded from recommendations as it is the dominant platform brand and would always rank first. Recommendations focus on brands with strong natural affinity and growth potential.</div>", unsafe_allow_html=True)
 
-    # Only food instore brands, exclude KFC
     food_instore_brands = (
-        df[(df['CHANNEL']=='Instore') & (df['CATEGORY_CLEAN']=='Food') & (df['BRAND_CLEAN'].notna()) & (df['BRAND_CLEAN']!='KFC')]
+        df[(df['CHANNEL']=='Instore') &
+           (df['CATEGORY_CLEAN']=='Food') &
+           (df['BRAND_CLEAN'].notna()) &
+           (df['BRAND_CLEAN']!='KFC')]
         ['BRAND_CLEAN'].value_counts().head(30).index.tolist()
     )
 
@@ -462,54 +422,45 @@ elif page == "Rs.199 Recommender":
         city_scope = st.multiselect("City Scope", ["Nationwide"] + all_cities_r, default=["Nationwide"])
 
     with st.spinner("Analysing affinity..."):
-        # Filter by city scope
         if "Nationwide" in city_scope or not city_scope:
             df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna())]
         else:
             df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna()) & (df['CITY'].isin(city_scope))]
 
-        brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
-        user_tx = (df_instore.sort_values('DATE').groupby('MASTER_ID')['BRAND_CLEAN'].apply(list).to_dict())
+        # Use pre-calculated affinity
+        brand_next_aff = affinity_db[
+            (affinity_db['Brand']==current_brand) &
+            (affinity_db['Channel']=='Instore') &
+            (affinity_db['Type']=='next_brand')
+        ].sort_values('Users', ascending=False)
 
-        next_b = []
-        for u in brand_users:
-            tx = user_tx.get(u,[])
-            if current_brand in tx:
-                idx = tx.index(current_brand)
-                for b in tx[idx+1:]:
-                    if b != current_brand: next_b.append(b); break
-        next_counts = Counter(next_b)
+        brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
 
         candidates = []
-        for brand,aff_count in next_counts.most_common(50):
-            if brand in [current_brand, 'KFC']: continue
-            # Only food brands
+        for _,row in brand_next_aff.iterrows():
+            brand = row['Related_Brand']
+            if brand in [current_brand,'KFC']: continue
             brand_cat = df[df['BRAND_CLEAN']==brand]['CATEGORY_CLEAN'].value_counts()
-            if len(brand_cat)==0 or brand_cat.index[0] != 'Food': continue
+            if len(brand_cat)==0 or brand_cat.index[0]!='Food': continue
 
-            bc_row = brand_city[brand_city['BRAND_CLEAN']==brand]
+            bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
             cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
             total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
-            aff_pct = round(aff_count/len(brand_users)*100,1)
+            aff_pct = round(row['Users']/len(brand_users)*100,1) if len(brand_users)>0 else 0
             city_score  = min(cities/36*100,100)
             scale_score = min(total_c/61840*100,100)
             final_score = round(aff_pct*0.4 + city_score*0.3 + scale_score*0.3, 1)
             candidates.append({
-                'Brand':brand,'Affinity %':aff_pct,'Users after':aff_count,
-                'Cities':cities,'Platform users':total_c,'Score':final_score,
-                'Type':'Established'
+                'Brand':brand,'Affinity %':aff_pct,'Users after':int(row['Users']),
+                'Cities':cities,'Platform users':total_c,'Score':final_score
             })
 
-        rec_df = pd.DataFrame(candidates).sort_values('Score',ascending=False) if candidates else pd.DataFrame()
-
-        # Emerging brands — lower volume but decent affinity
-        emerging = rec_df[rec_df['Platform users'] < 5000].head(3) if len(rec_df)>0 else pd.DataFrame()
-        top_rec  = rec_df[rec_df['Platform users'] >= 5000].head(5) if len(rec_df)>0 else pd.DataFrame()
+        rec_df      = pd.DataFrame(candidates).sort_values('Score',ascending=False) if candidates else pd.DataFrame()
+        top_rec     = rec_df[rec_df['Platform users']>=5000].head(5) if len(rec_df)>0 else pd.DataFrame()
+        emerging    = rec_df[rec_df['Platform users']<5000].head(3) if len(rec_df)>0 else pd.DataFrame()
 
     if len(top_rec)>0:
         winner = top_rec.iloc[0]
-
-        # Winner card — brand left, 4 stats right in 2x2
         st.markdown(f'''
         <div class="winner-card">
           <div style="display:flex;align-items:center;gap:32px;">
@@ -541,16 +492,13 @@ elif page == "Rs.199 Recommender":
 
         col1,col2 = st.columns(2)
         with col1:
-            st.markdown("<div class='g-section'>Top established brand recommendations</div>", unsafe_allow_html=True)
             fig = px.bar(top_rec.sort_values('Score'), x='Score', y='Brand',
                          orientation='h', color='Score',
                          color_continuous_scale=[[0,'#0a1929'],[1,BLUE]], text='Score')
             fig.update_traces(textposition='outside', textfont_color='#f0f4f8', marker_line_width=0)
             fig.update_layout(coloraxis_showscale=False)
             gc(fig,280)
-
         with col2:
-            st.markdown("<div class='g-section'>Affinity vs city coverage</div>", unsafe_allow_html=True)
             fig2 = px.scatter(top_rec, x='Affinity %', y='Cities', size='Platform users',
                               color='Brand', hover_name='Brand', size_max=40)
             fig2.update_traces(marker_line_width=0)
@@ -558,7 +506,7 @@ elif page == "Rs.199 Recommender":
 
         if len(emerging)>0:
             st.markdown("<div class='g-section'>Emerging brands with potential</div>", unsafe_allow_html=True)
-            st.markdown("<p class='g-caption'>Lower platform volume but strong affinity — brands worth testing.</p>", unsafe_allow_html=True)
+            st.markdown("<p class='g-caption'>Lower platform volume but strong affinity — worth testing in select cities first.</p>", unsafe_allow_html=True)
             em_rows = ''
             for _,r in emerging.iterrows():
                 em_rows += f'''<tr style="border-bottom:1px solid #1e2235;">
@@ -582,7 +530,7 @@ elif page == "Rs.199 Recommender":
               </table>
             </div>''', unsafe_allow_html=True)
 
-        st.markdown("<div class='g-section'>Full recommendations table</div>", unsafe_allow_html=True)
+        st.markdown("<div class='g-section'>Full recommendations</div>", unsafe_allow_html=True)
         st.dataframe(top_rec, use_container_width=True, hide_index=True)
         st.markdown(f"<div class='g-card'><p style='font-size:13px;color:#718096;margin:0;'><strong style='color:#a0aec0;'>Score formula:</strong> Affinity % (40%) + City coverage (30%) + Platform scale (30%). Food brands only. KFC excluded. Instore only.</p></div>", unsafe_allow_html=True)
     else:
@@ -626,7 +574,6 @@ elif page == "Subscriptions":
                      orientation='h', color_discrete_sequence=[BLUE])
         fig.update_traces(marker_line_width=0)
         gc(fig,300)
-
     with col2:
         st.markdown("<div class='g-section'>Active vs Lapsed</div>", unsafe_allow_html=True)
         status = subs_f['Subscription_Status'].value_counts().reset_index()
@@ -649,7 +596,6 @@ elif page == "Subscriptions":
                       color_discrete_sequence=[BLUE,'#2dd4a0'])
         fig3.update_traces(textposition='outside', textfont_size=12, textfont_color='#a0aec0')
         gc(fig3,300)
-
     with col4:
         st.markdown("<div class='g-section'>Payment method breakdown</div>", unsafe_allow_html=True)
         pay_method = subs_f['Transaction_Type'].value_counts().head(8).reset_index()
@@ -668,7 +614,6 @@ elif page == "Subscriptions":
                       orientation='h', color_discrete_sequence=[BLUE])
         fig5.update_traces(marker_line_width=0)
         gc(fig5,380)
-
     with col6:
         city_pkg = subs_f.groupby(['City','Subscription_Package']).size().reset_index(name='Count')
         city_top_s = city_subs.head(8)['City'].tolist()
@@ -721,15 +666,12 @@ elif page == "Customer Lookup":
             sub_row = subs[subs['User_Number'].astype(str).str.replace('.0','').str.strip()==phone] if len(subs)>0 else pd.DataFrame()
             sub_pkg = sub_row['Subscription_Package'].iloc[0] if len(sub_row)>0 else None
 
-            # Header row
             badges = ''
             if is_rs199: badges += f'<span style="background:#2e1f0e;color:#fb923c;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:500;margin-right:6px;">Rs.199 User</span>'
             if sub_pkg:  badges += f'<span style="background:#0a1929;color:{BLUE};padding:3px 10px;border-radius:5px;font-size:12px;font-weight:500;">{sub_pkg}</span>'
 
             st.markdown(f'''
             <div style="background:#1a1d2e;border:1px solid #1e2235;border-radius:12px;overflow:hidden;margin-bottom:16px;">
-
-              <!-- Name + segment row -->
               <div style="padding:16px 22px;border-bottom:1px solid #1e2235;display:flex;justify-content:space-between;align-items:center;">
                 <div>
                   <span style="font-size:20px;font-weight:600;color:#f0f4f8;">{name}</span>
@@ -738,8 +680,6 @@ elif page == "Customer Lookup":
                 </div>
                 <span style="background:{seg_bg};color:{seg_c};padding:6px 16px;border-radius:8px;font-size:15px;font-weight:600;">{seg}</span>
               </div>
-
-              <!-- 4 key metrics -->
               <div style="display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #1e2235;">
                 <div style="padding:16px 20px;border-right:1px solid #1e2235;">
                   <div style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Last Visit</div>
@@ -747,9 +687,9 @@ elif page == "Customer Lookup":
                   <div style="font-size:12px;color:#718096;margin-top:4px;">Recency score {r_s}/5</div>
                 </div>
                 <div style="padding:16px 20px;border-right:1px solid #1e2235;">
-                  <div style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Total Transactions</div>
+                  <div style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Transactions</div>
                   <div style="font-size:26px;font-weight:600;color:#f0f4f8;">{freq}</div>
-                  <div style="font-size:12px;color:#718096;margin-top:4px;">{avg_m}/month avg · F score {f_s}/5</div>
+                  <div style="font-size:12px;color:#718096;margin-top:4px;">{avg_m}/month avg · F {f_s}/5</div>
                 </div>
                 <div style="padding:16px 20px;border-right:1px solid #1e2235;">
                   <div style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;">Delivery Spend</div>
@@ -762,19 +702,16 @@ elif page == "Customer Lookup":
                   <div style="font-size:12px;color:#718096;margin-top:4px;">{top_c}</div>
                 </div>
               </div>
-
-              <!-- Journey row -->
               <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #1e2235;">
                 <div style="padding:12px 22px;border-right:1px solid #1e2235;">
                   <span style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;">Channel Journey  </span>
                   <span style="font-size:13px;color:#e2e8f0;font-weight:500;">{ch_j}</span>
                 </div>
                 <div style="padding:12px 22px;">
-                  <span style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;">Active Since  </span>
+                  <span style="font-size:11px;color:#718096;text-transform:uppercase;letter-spacing:.06em;">Active  </span>
                   <span style="font-size:13px;color:#e2e8f0;font-weight:500;">{fd} → {ld}</span>
                 </div>
               </div>
-
             </div>''', unsafe_allow_html=True)
 
             col1,col2 = st.columns(2)
