@@ -18,7 +18,7 @@ def check_password():
             st.markdown("<p style='color:#718096;font-size:13px;text-align:center;'>Enter your password to continue</p>", unsafe_allow_html=True)
             pwd = st.text_input("", type="password", placeholder="Password", label_visibility="collapsed")
             if st.button("Continue", use_container_width=True):
-                if pwd == "YusraAlam1515":
+                if pwd == "Golootlo2026":
                     st.session_state.authenticated = True
                     st.rerun()
                 else:
