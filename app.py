@@ -363,6 +363,7 @@ elif page == "Brand Affinity":
 
             col1,col2 = st.columns(2)
             with col1:
+                st.markdown("<p style='font-size:12px;color:#718096;margin-bottom:4px;'>Which other brands do this brand's customers use — at any point in time.</p>", unsafe_allow_html=True)
                 if len(also_use)>0:
                     fig = px.bar(also_use.sort_values('Users'), x='Users', y='Related_Brand',
                                  orientation='h', title="Customers also use",
@@ -370,6 +371,7 @@ elif page == "Brand Affinity":
                     fig.update_traces(marker_line_width=0)
                     gc(fig,280)
             with col2:
+                st.markdown("<p style='font-size:12px;color:#718096;margin-bottom:4px;'>After visiting this brand for the first time, which brand did customers go to next.</p>", unsafe_allow_html=True)
                 if len(next_brand)>0:
                     fig2 = px.bar(next_brand.sort_values('Users'), x='Users', y='Related_Brand',
                                   orientation='h', title="Next brand after first visit",
@@ -402,77 +404,109 @@ elif page == "Brand Affinity":
 # ══════════════════════════════════════════════════════════════════════
 elif page == "Rs.199 Recommender":
     st.markdown("## Next Rs.199 Campaign Recommender")
-    st.markdown("<p class='g-caption'>Instore only · Food category · Scored on brand affinity + city coverage + platform scale</p>", unsafe_allow_html=True)
+    st.markdown("<p class='g-caption'>Instore only · Scored on brand affinity + city coverage + platform scale</p>", unsafe_allow_html=True)
 
-    st.markdown("<div class='disclaimer'>KFC is excluded from recommendations as it is the dominant platform brand and would always rank first. Recommendations focus on brands with strong natural affinity and growth potential.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='disclaimer'>KFC and Domino's are excluded — both are dominant platform brands that would always rank first. Recommendations surface brands with strong natural affinity and real growth potential, including emerging brands.</div>", unsafe_allow_html=True)
 
-    food_instore_brands = (
+    EXCLUDED_BRANDS = ['KFC', "Domino's"]
+
+    # All instore brands — not just food, not just rs199 brands
+    all_instore_brands = sorted(
         df[(df['CHANNEL']=='Instore') &
-           (df['CATEGORY_CLEAN']=='Food') &
            (df['BRAND_CLEAN'].notna()) &
-           (df['BRAND_CLEAN']!='KFC')]
-        ['BRAND_CLEAN'].value_counts().head(30).index.tolist()
+           (~df['BRAND_CLEAN'].isin(EXCLUDED_BRANDS))]
+        ['BRAND_CLEAN'].value_counts().index.tolist()
     )
 
     col_f1,col_f2 = st.columns(2)
     with col_f1:
-        current_brand = st.selectbox("Current Rs.199 Brand (this month)", food_instore_brands)
+        # Multi-select for last 1-3 campaigns
+        past_brands = st.multiselect(
+            "Select past Rs.199 brand(s) — up to 3",
+            all_instore_brands,
+            default=[all_instore_brands[0]] if all_instore_brands else [],
+            max_selections=3
+        )
     with col_f2:
         all_cities_r = sorted(df[df['CHANNEL']=='Instore']['CITY'].dropna().unique().tolist())
         city_scope = st.multiselect("City Scope", ["Nationwide"] + all_cities_r, default=["Nationwide"])
 
-    with st.spinner("Analysing affinity..."):
+    if not past_brands:
+        st.info("Select at least one past Rs.199 brand above.")
+        st.stop()
+
+    with st.spinner("Analysing affinity across selected brands..."):
         if "Nationwide" in city_scope or not city_scope:
             df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna())]
         else:
             df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna()) & (df['CITY'].isin(city_scope))]
 
-        # Use pre-calculated affinity
-        brand_next_aff = affinity_db[
-            (affinity_db['Brand']==current_brand) &
-            (affinity_db['Channel']=='Instore') &
-            (affinity_db['Type']=='next_brand')
-        ].sort_values('Users', ascending=False)
+        # Combine affinity from all selected past brands
+        combined_scores = {}
 
-        brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
+        for current_brand in past_brands:
+            brand_next_aff = affinity_db[
+                (affinity_db['Brand']==current_brand) &
+                (affinity_db['Channel']=='Instore') &
+                (affinity_db['Type']=='next_brand')
+            ].sort_values('Users', ascending=False)
 
-        candidates = []
-        for _,row in brand_next_aff.iterrows():
-            brand = row['Related_Brand']
-            if brand in [current_brand,'KFC']: continue
-            brand_cat = df[df['BRAND_CLEAN']==brand]['CATEGORY_CLEAN'].value_counts()
-            if len(brand_cat)==0 or brand_cat.index[0]!='Food': continue
+            brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
+            if len(brand_users)==0: continue
 
-            bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
-            cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
-            total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
-            aff_pct = round(row['Users']/len(brand_users)*100,1) if len(brand_users)>0 else 0
-            city_score  = min(cities/36*100,100)
-            scale_score = min(total_c/61840*100,100)
-            final_score = round(aff_pct*0.4 + city_score*0.3 + scale_score*0.3, 1)
-            candidates.append({
-                'Brand':brand,'Affinity %':aff_pct,'Users after':int(row['Users']),
-                'Cities':cities,'Platform users':total_c,'Score':final_score
-            })
+            for _,row in brand_next_aff.iterrows():
+                brand = row['Related_Brand']
+                if brand in past_brands + EXCLUDED_BRANDS: continue
 
-        rec_df      = pd.DataFrame(candidates).sort_values('Score',ascending=False) if candidates else pd.DataFrame()
-        top_rec     = rec_df[rec_df['Platform users']>=5000].head(5) if len(rec_df)>0 else pd.DataFrame()
-        emerging    = rec_df[rec_df['Platform users']<5000].head(3) if len(rec_df)>0 else pd.DataFrame()
+                bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
+                cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
+                total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
+                aff_pct = round(row['Users']/len(brand_users)*100,1)
+                city_score  = min(cities/36*100,100)
+                scale_score = min(total_c/61840*100,100)
+                score = round(aff_pct*0.4 + city_score*0.3 + scale_score*0.3, 1)
+
+                if brand not in combined_scores:
+                    combined_scores[brand] = {
+                        'Brand':brand,'Cities':cities,'Platform users':total_c,
+                        'Total Affinity':aff_pct,'Total Users':int(row['Users']),
+                        'Score':score,'Appears in':1
+                    }
+                else:
+                    combined_scores[brand]['Total Affinity'] += aff_pct
+                    combined_scores[brand]['Total Users'] += int(row['Users'])
+                    combined_scores[brand]['Score'] += score
+                    combined_scores[brand]['Appears in'] += 1
+
+        if combined_scores:
+            rec_df = pd.DataFrame(combined_scores.values())
+            # Boost brands that appear across multiple past campaigns
+            rec_df['Score'] = rec_df['Score'] * (1 + rec_df['Appears in']*0.1)
+            rec_df['Affinity %'] = (rec_df['Total Affinity']/rec_df['Appears in']).round(1)
+            rec_df = rec_df.sort_values('Score', ascending=False)
+        else:
+            rec_df = pd.DataFrame()
+
+        # Split established vs emerging
+        top_rec  = rec_df[rec_df['Platform users']>=3000].head(5) if len(rec_df)>0 else pd.DataFrame()
+        emerging = rec_df[rec_df['Platform users']<3000].head(5) if len(rec_df)>0 else pd.DataFrame()
 
     if len(top_rec)>0:
         winner = top_rec.iloc[0]
+        past_brands_str = ' + '.join(past_brands)
         st.markdown(f'''
         <div class="winner-card">
           <div style="display:flex;align-items:center;gap:32px;">
             <div style="flex:1;">
               <div style="font-size:11px;color:{BLUE};text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">Recommended Next Brand</div>
               <div style="font-size:32px;font-weight:700;color:#f0f4f8;line-height:1.1;">{winner["Brand"]}</div>
-              <div style="font-size:13px;color:#718096;margin-top:8px;">{int(winner["Users after"]):,} {current_brand} customers naturally visit {winner["Brand"]} after their first instore visit.</div>
+              <div style="font-size:13px;color:#718096;margin-top:8px;">Based on affinity from: <strong style="color:#a0aec0;">{past_brands_str}</strong>. Customers from these campaigns naturally visit {winner["Brand"]} next.</div>
+              {'<div style="margin-top:8px;font-size:12px;color:#2dd4a0;">Appears in affinity data for '+str(int(winner["Appears in"]))+' of your selected brand(s)</div>' if int(winner["Appears in"])>1 else ''}
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;min-width:320px;">
               <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
                 <div style="font-size:28px;font-weight:700;color:{BLUE};">{winner["Affinity %"]}%</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Affinity Score</div>
+                <div style="font-size:11px;color:#718096;margin-top:4px;">Avg Affinity Score</div>
               </div>
               <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
                 <div style="font-size:28px;font-weight:700;color:#2dd4a0;">{winner["Cities"]}</div>
@@ -483,30 +517,37 @@ elif page == "Rs.199 Recommender":
                 <div style="font-size:11px;color:#718096;margin-top:4px;">Platform Customers</div>
               </div>
               <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
-                <div style="font-size:28px;font-weight:700;color:#f0f4f8;">{winner["Score"]}</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Recommendation Score</div>
+                <div style="font-size:28px;font-weight:700;color:#f0f4f8;">{round(winner["Score"],1)}</div>
+                <div style="font-size:11px;color:#718096;margin-top:4px;">Combined Score</div>
               </div>
             </div>
           </div>
         </div>''', unsafe_allow_html=True)
 
+        # Combine top + emerging for chart — minimum 3 brands shown
+        chart_df = top_rec.copy()
+        if len(chart_df) < 3 and len(emerging) > 0:
+            needed = 3 - len(chart_df)
+            chart_df = pd.concat([chart_df, emerging.head(needed)], ignore_index=True)
+        chart_df = chart_df.drop_duplicates(subset=['Brand']).sort_values('Score', ascending=False).head(6)
+
         col1,col2 = st.columns(2)
         with col1:
-            fig = px.bar(top_rec.sort_values('Score'), x='Score', y='Brand',
+            fig = px.bar(chart_df.sort_values('Score'), x='Score', y='Brand',
                          orientation='h', color='Score',
                          color_continuous_scale=[[0,'#0a1929'],[1,BLUE]], text='Score')
             fig.update_traces(textposition='outside', textfont_color='#f0f4f8', marker_line_width=0)
             fig.update_layout(coloraxis_showscale=False)
-            gc(fig,280)
+            gc(fig,300)
         with col2:
-            fig2 = px.scatter(top_rec, x='Affinity %', y='Cities', size='Platform users',
+            fig2 = px.scatter(chart_df, x='Affinity %', y='Cities', size='Platform users',
                               color='Brand', hover_name='Brand', size_max=40)
             fig2.update_traces(marker_line_width=0)
-            gc(fig2,280)
+            gc(fig2,300)
 
         if len(emerging)>0:
-            st.markdown("<div class='g-section'>Emerging brands with potential</div>", unsafe_allow_html=True)
-            st.markdown("<p class='g-caption'>Lower platform volume but strong affinity — worth testing in select cities first.</p>", unsafe_allow_html=True)
+            st.markdown("<div class='g-section'>Emerging brands — low volume, strong affinity signal</div>", unsafe_allow_html=True)
+            st.markdown("<p class='g-caption'>These brands have fewer platform users but customers from your past campaigns naturally go there. High-risk, high-reward picks. Test in 2-3 cities first before going nationwide.</p>", unsafe_allow_html=True)
             em_rows = ''
             for _,r in emerging.iterrows():
                 em_rows += f'''<tr style="border-bottom:1px solid #1e2235;">
