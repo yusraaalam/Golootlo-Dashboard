@@ -494,6 +494,9 @@ elif page == "Rs.199 Recommender":
     if len(top_rec)>0:
         winner = top_rec.iloc[0]
         past_brands_str = ' + '.join(past_brands)
+        appears_in = int(winner["Appears in"])
+        appears_note = f'<div style="margin-top:8px;font-size:12px;color:#2dd4a0;">Appears in affinity data for {appears_in} of your selected brand(s)</div>' if appears_in > 1 else ''
+        
         st.markdown(f'''
         <div class="winner-card">
           <div style="display:flex;align-items:center;gap:32px;">
@@ -501,7 +504,7 @@ elif page == "Rs.199 Recommender":
               <div style="font-size:11px;color:{BLUE};text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">Recommended Next Brand</div>
               <div style="font-size:32px;font-weight:700;color:#f0f4f8;line-height:1.1;">{winner["Brand"]}</div>
               <div style="font-size:13px;color:#718096;margin-top:8px;">Based on affinity from: <strong style="color:#a0aec0;">{past_brands_str}</strong>. Customers from these campaigns naturally visit {winner["Brand"]} next.</div>
-              {'<div style="margin-top:8px;font-size:12px;color:#2dd4a0;">Appears in affinity data for '+str(int(winner["Appears in"]))+' of your selected brand(s)</div>' if int(winner["Appears in"])>1 else ''}
+              {appears_note}
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;min-width:320px;">
               <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
