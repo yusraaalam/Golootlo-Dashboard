@@ -445,23 +445,23 @@ elif page == "Rs.199 Recommender":
         combined_scores = {}
 
         for current_brand in past_brands:
-            brand_also_use = affinity_db[
-                (affinity_db['Brand']==current_brand) &
-                (affinity_db['Channel']=='Instore') &
-                (affinity_db['Type']=='also_use')
-            ].sort_values('Users', ascending=False)
-
             brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
             if len(brand_users)==0: continue
 
-            for _,row in brand_also_use.iterrows():
-                brand = row['Related_Brand']
+            # Calculate live from scored data — all brands, no cap on number
+            also_use = df_instore[
+                (df_instore['MASTER_ID'].isin(brand_users)) &
+                (df_instore['BRAND_CLEAN']!=current_brand) &
+                (df_instore['BRAND_CLEAN'].notna()) &
+                (~df_instore['BRAND_CLEAN'].isin(EXCLUDED_BRANDS))
+            ]['BRAND_CLEAN'].value_counts().head(30)
+
+            for brand, overlap_users in also_use.items():
                 if brand in past_brands + EXCLUDED_BRANDS: continue
 
                 bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
                 cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
                 total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
-                overlap_users = int(row['Users'])
                 overlap_pct = round(overlap_users/len(brand_users)*100,1)
                 city_score  = min(cities/36*100,100)
                 scale_score = min(total_c/61840*100,100)
@@ -470,12 +470,12 @@ elif page == "Rs.199 Recommender":
                 if brand not in combined_scores:
                     combined_scores[brand] = {
                         'Brand':brand,'Cities':cities,'Platform users':total_c,
-                        'Total Affinity':overlap_pct,'Total Users':overlap_users,
+                        'Total Affinity':overlap_pct,'Total Users':int(overlap_users),
                         'Score':score,'Appears in':1
                     }
                 else:
                     combined_scores[brand]['Total Affinity'] += overlap_pct
-                    combined_scores[brand]['Total Users'] += overlap_users
+                    combined_scores[brand]['Total Users'] += int(overlap_users)
                     combined_scores[brand]['Score'] += score
                     combined_scores[brand]['Appears in'] += 1
 
