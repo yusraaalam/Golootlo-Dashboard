@@ -18,7 +18,7 @@ def check_password():
             st.markdown("<p style='color:#718096;font-size:13px;text-align:center;'>Enter your password to continue</p>", unsafe_allow_html=True)
             pwd = st.text_input("", type="password", placeholder="Password", label_visibility="collapsed")
             if st.button("Continue", use_container_width=True):
-                if pwd == "Golootlo2026":
+                if pwd == "YusraAlam1515":
                     st.session_state.authenticated = True
                     st.rerun()
                 else:
@@ -496,36 +496,36 @@ elif page == "Rs.199 Recommender":
         past_brands_str = ' + '.join(past_brands)
         appears_in = int(winner["Appears in"])
         appears_note = f'<div style="margin-top:8px;font-size:12px;color:#2dd4a0;">Appears in affinity data for {appears_in} of your selected brand(s)</div>' if appears_in > 1 else ''
-        
-        st.markdown(f'''
-        <div class="winner-card">
-          <div style="display:flex;align-items:center;gap:32px;">
-            <div style="flex:1;">
-              <div style="font-size:11px;color:{BLUE};text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">Recommended Next Brand</div>
-              <div style="font-size:32px;font-weight:700;color:#f0f4f8;line-height:1.1;">{winner["Brand"]}</div>
-              <div style="font-size:13px;color:#718096;margin-top:8px;">Based on affinity from: <strong style="color:#a0aec0;">{past_brands_str}</strong>. Customers from these campaigns naturally visit {winner["Brand"]} next.</div>
-              {appears_note}
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;min-width:320px;">
-              <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
-                <div style="font-size:28px;font-weight:700;color:{BLUE};">{winner["Affinity %"]}%</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Avg Affinity Score</div>
-              </div>
-              <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
-                <div style="font-size:28px;font-weight:700;color:#2dd4a0;">{winner["Cities"]}</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Cities Covered</div>
-              </div>
-              <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
-                <div style="font-size:28px;font-weight:700;color:#fb923c;">{int(winner["Platform users"]):,}</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Platform Customers</div>
-              </div>
-              <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
-                <div style="font-size:28px;font-weight:700;color:#f0f4f8;">{round(winner["Score"],1)}</div>
-                <div style="font-size:11px;color:#718096;margin-top:4px;">Combined Score</div>
-              </div>
-            </div>
-          </div>
-        </div>''', unsafe_allow_html=True)
+
+        st.markdown(f"""
+<div style="background:#0a1929;border:1.5px solid {BLUE};border-radius:12px;padding:24px;margin-bottom:1.5rem;">
+  <div style="display:flex;align-items:center;gap:32px;">
+    <div style="flex:1;">
+      <div style="font-size:11px;color:{BLUE};text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px;">Recommended Next Brand</div>
+      <div style="font-size:32px;font-weight:700;color:#f0f4f8;line-height:1.1;">{winner["Brand"]}</div>
+      <div style="font-size:13px;color:#718096;margin-top:8px;">Based on affinity from: <strong style="color:#a0aec0;">{past_brands_str}</strong>. Customers from these campaigns naturally visit {winner["Brand"]} next.</div>
+      {appears_note}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;min-width:320px;">
+      <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
+        <div style="font-size:28px;font-weight:700;color:{BLUE};">{winner["Affinity %"]}%</div>
+        <div style="font-size:11px;color:#718096;margin-top:4px;">Avg Affinity Score</div>
+      </div>
+      <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
+        <div style="font-size:28px;font-weight:700;color:#2dd4a0;">{winner["Cities"]}</div>
+        <div style="font-size:11px;color:#718096;margin-top:4px;">Cities Covered</div>
+      </div>
+      <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
+        <div style="font-size:28px;font-weight:700;color:#fb923c;">{int(winner["Platform users"]):,}</div>
+        <div style="font-size:11px;color:#718096;margin-top:4px;">Platform Customers</div>
+      </div>
+      <div style="text-align:center;background:#0d1929;border-radius:8px;padding:14px;">
+        <div style="font-size:28px;font-weight:700;color:#f0f4f8;">{round(winner["Score"],1)}</div>
+        <div style="font-size:11px;color:#718096;margin-top:4px;">Combined Score</div>
+      </div>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
         # Combine top + emerging for chart — minimum 3 brands shown
         chart_df = top_rec.copy()
