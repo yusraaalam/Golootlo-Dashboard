@@ -448,11 +448,13 @@ elif page == "Rs.199 Recommender":
             brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
             if len(brand_users)==0: continue
 
-            # Calculate live from scored data — all brands, no cap on number
+            # Calculate live from scored data — food instore brands only
+            food_brands = set(df_instore[df_instore['CATEGORY_CLEAN']=='Food']['BRAND_CLEAN'].dropna().unique())
             also_use = df_instore[
                 (df_instore['MASTER_ID'].isin(brand_users)) &
                 (df_instore['BRAND_CLEAN']!=current_brand) &
                 (df_instore['BRAND_CLEAN'].notna()) &
+                (df_instore['BRAND_CLEAN'].isin(food_brands)) &
                 (~df_instore['BRAND_CLEAN'].isin(EXCLUDED_BRANDS))
             ]['BRAND_CLEAN'].value_counts().head(30)
 
@@ -530,7 +532,7 @@ elif page == "Rs.199 Recommender":
 
         if len(emerging)>0:
             st.markdown("<div class='g-section'>Emerging brands — low volume, strong affinity signal</div>", unsafe_allow_html=True)
-            st.markdown("<p class='g-caption'>These brands have fewer platform users but customers from your past campaigns naturally go there. High-risk, high-reward picks. Test in 2-3 cities first before going nationwide.</p>", unsafe_allow_html=True)
+            st.markdown("<p class='g-caption'>Lower platform volume but strong customer overlap. Worth testing in 2-3 cities before going nationwide.</p>", unsafe_allow_html=True)
             em_rows = ''
             for _,r in emerging.iterrows():
                 em_rows += f'''<tr style="border-bottom:1px solid #1e2235;">
@@ -555,7 +557,8 @@ elif page == "Rs.199 Recommender":
             </div>''', unsafe_allow_html=True)
 
         st.markdown("<div class='g-section'>Full recommendations</div>", unsafe_allow_html=True)
-        st.dataframe(top_rec, use_container_width=True, hide_index=True)
+        display_cols = ['Brand','Cities','Platform users','Total Users','Score']
+        st.dataframe(top_rec[display_cols], use_container_width=True, hide_index=True)
         st.markdown(f"<div class='g-card'><p style='font-size:13px;color:#718096;margin:0;'><strong style='color:#a0aec0;'>Score formula:</strong> Affinity % (40%) + City coverage (30%) + Platform scale (30%). Food brands only. KFC excluded. Instore only.</p></div>", unsafe_allow_html=True)
     else:
         st.warning("No food brand candidates found. Try changing the city scope.")
