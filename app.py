@@ -445,36 +445,37 @@ elif page == "Rs.199 Recommender":
         combined_scores = {}
 
         for current_brand in past_brands:
-            brand_next_aff = affinity_db[
+            brand_also_use = affinity_db[
                 (affinity_db['Brand']==current_brand) &
                 (affinity_db['Channel']=='Instore') &
-                (affinity_db['Type']=='next_brand')
+                (affinity_db['Type']=='also_use')
             ].sort_values('Users', ascending=False)
 
             brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
             if len(brand_users)==0: continue
 
-            for _,row in brand_next_aff.iterrows():
+            for _,row in brand_also_use.iterrows():
                 brand = row['Related_Brand']
                 if brand in past_brands + EXCLUDED_BRANDS: continue
 
                 bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
                 cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
                 total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
-                aff_pct = round(row['Users']/len(brand_users)*100,1)
+                overlap_users = int(row['Users'])
+                overlap_pct = round(overlap_users/len(brand_users)*100,1)
                 city_score  = min(cities/36*100,100)
                 scale_score = min(total_c/61840*100,100)
-                score = round(aff_pct*0.4 + city_score*0.3 + scale_score*0.3, 1)
+                score = round(overlap_pct*0.5 + city_score*0.3 + scale_score*0.2, 1)
 
                 if brand not in combined_scores:
                     combined_scores[brand] = {
                         'Brand':brand,'Cities':cities,'Platform users':total_c,
-                        'Total Affinity':aff_pct,'Total Users':int(row['Users']),
+                        'Total Affinity':overlap_pct,'Total Users':overlap_users,
                         'Score':score,'Appears in':1
                     }
                 else:
-                    combined_scores[brand]['Total Affinity'] += aff_pct
-                    combined_scores[brand]['Total Users'] += int(row['Users'])
+                    combined_scores[brand]['Total Affinity'] += overlap_pct
+                    combined_scores[brand]['Total Users'] += overlap_users
                     combined_scores[brand]['Score'] += score
                     combined_scores[brand]['Appears in'] += 1
 
@@ -497,13 +498,13 @@ elif page == "Rs.199 Recommender":
 
         st.markdown("<div class='g-section'>Recommended next brand</div>", unsafe_allow_html=True)
         st.markdown(f"### {winner['Brand']}")
-        st.caption(f"Based on affinity from: {past_brands_str} · Customers from these campaigns naturally visit {winner['Brand']} next.")
+        st.caption(f"Based on customer overlap from: {past_brands_str} · These brands share the most customers with your past Rs.199 campaign(s) — making them the strongest next pick.")
 
         c1,c2,c3,c4 = st.columns(4)
-        c1.metric("Avg Affinity Score", f"{winner['Affinity %']}%")
-        c2.metric("Cities Covered",     f"{winner['Cities']}")
-        c3.metric("Platform Customers", f"{int(winner['Platform users']):,}")
-        c4.metric("Combined Score",     f"{round(winner['Score'],1)}")
+        c1.metric("Customer Overlap %", f"{winner['Affinity %']}%")
+        c2.metric("Cities Covered",      f"{winner['Cities']}")
+        c3.metric("Platform Customers",  f"{int(winner['Platform users']):,}")
+        c4.metric("Recommendation Score",f"{round(winner['Score'],1)}")
         st.markdown("<div class='g-divider'></div>", unsafe_allow_html=True)
 
         # Combine top + emerging for chart — minimum 3 brands shown
