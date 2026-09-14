@@ -61,14 +61,37 @@ def get_engine():
 @st.cache_data(show_spinner="Loading data...")
 def load_data():
     engine = get_engine()
-    df      = pd.read_sql("SELECT * FROM scored",        engine)
+    # Load only needed columns from scored — reduces memory significantly
+    df      = pd.read_sql("""SELECT CHANNEL, DATE, MASTER_ID, BRAND_CLEAN,
+                              CATEGORY_CLEAN, CITY, AMOUNT, MONTH_NUM,
+                              MONTH_NAME, YEAR, IS_RS199, SEGMENT,
+                              CUSTOMER_NAME, OFFER_TITLE, OFFER_DESC
+                              FROM scored""", engine)
     rfm     = pd.read_sql("SELECT * FROM rfm",           engine)
-    journey = pd.read_sql("SELECT * FROM journey",       engine)
+    journey = pd.read_sql("""SELECT MASTER_ID, CHANNEL_JOURNEY, CATEGORY_JOURNEY,
+                              TOP_BRAND, TOP_CATEGORY, IS_MULTICHANNEL
+                              FROM journey""", engine)
     bc      = pd.read_sql("SELECT * FROM brand_city",    engine)
     rs199p  = pd.read_sql("SELECT * FROM rs199_products",engine)
-    subs    = pd.read_sql("SELECT * FROM subscriptions", engine)
+    subs    = pd.read_sql("""SELECT USER_NUMBER, USER_NAME, SUBSCRIPTION_STATUS,
+                              SUBSCRIPTION_PACKAGE, TRANSACTION_TYPE,
+                              SUBSCRIPTION_START_DATE, SUBSCRIPTION_END_DATE,
+                              CITY, DEVICE_TYPE, SUBSCRIPTION_MONTH
+                              FROM subscriptions""", engine)
     aff     = pd.read_sql("SELECT * FROM brand_affinity",engine)
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
+    # Rename columns to match expected case
+    df.columns = [c.upper() if c not in ['Segment'] else c for c in df.columns]
+    df = df.rename(columns={'SEGMENT':'Segment'})
+    journey.columns = [c.upper() for c in journey.columns]
+    journey = journey.rename(columns={
+        'CHANNEL_JOURNEY':'Channel_Journey',
+        'CATEGORY_JOURNEY':'Category_Journey',
+        'TOP_BRAND':'Top_Brand',
+        'TOP_CATEGORY':'Top_Category',
+        'IS_MULTICHANNEL':'Is_Multichannel'
+    })
+    subs.columns = [c.title().replace('_',' ').replace(' ','_') for c in subs.columns]
     return df, rfm, journey, bc, rs199p, subs, aff
 
 df, rfm, journey, brand_city, rs199_prod, subs, affinity_db = load_data()
@@ -435,21 +458,20 @@ elif page == "Rs.199 Recommender":
         st.info("Select at least one past Rs.199 brand above.")
         st.stop()
 
-    with st.spinner("Analysing affinity across selected brands..."):
-        if "Nationwide" in city_scope or not city_scope:
+    @st.cache_data(show_spinner=False)
+    def get_recommendations(past_brands_tuple, city_scope_tuple):
+        past_brands_list = list(past_brands_tuple)
+        combined_scores = {}
+        if "Nationwide" in city_scope_tuple or not city_scope_tuple:
             df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna())]
         else:
-            df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna()) & (df['CITY'].isin(city_scope))]
+            df_instore = df[(df['CHANNEL']=='Instore') & (df['BRAND_CLEAN'].notna()) & (df['CITY'].isin(city_scope_tuple))]
 
-        # Combine affinity from all selected past brands
-        combined_scores = {}
+        food_brands = set(df_instore[df_instore['CATEGORY_CLEAN']=='Food']['BRAND_CLEAN'].dropna().unique())
 
-        for current_brand in past_brands:
+        for current_brand in past_brands_list:
             brand_users = set(df_instore[df_instore['BRAND_CLEAN']==current_brand]['MASTER_ID'].unique())
             if len(brand_users)==0: continue
-
-            # Calculate live from scored data — food instore brands only
-            food_brands = set(df_instore[df_instore['CATEGORY_CLEAN']=='Food']['BRAND_CLEAN'].dropna().unique())
             also_use = df_instore[
                 (df_instore['MASTER_ID'].isin(brand_users)) &
                 (df_instore['BRAND_CLEAN']!=current_brand) &
@@ -459,8 +481,7 @@ elif page == "Rs.199 Recommender":
             ]['BRAND_CLEAN'].value_counts().head(30)
 
             for brand, overlap_users in also_use.items():
-                if brand in past_brands + EXCLUDED_BRANDS: continue
-
+                if brand in past_brands_list + EXCLUDED_BRANDS: continue
                 bc_row  = brand_city[brand_city['BRAND_CLEAN']==brand]
                 cities  = int(bc_row['Cities'].values[0]) if len(bc_row)>0 else 1
                 total_c = int(bc_row['Total_Customers'].values[0]) if len(bc_row)>0 else 0
@@ -468,13 +489,9 @@ elif page == "Rs.199 Recommender":
                 city_score  = min(cities/36*100,100)
                 scale_score = min(total_c/61840*100,100)
                 score = round(overlap_pct*0.5 + city_score*0.3 + scale_score*0.2, 1)
-
                 if brand not in combined_scores:
-                    combined_scores[brand] = {
-                        'Brand':brand,'Cities':cities,'Platform users':total_c,
-                        'Total Affinity':overlap_pct,'Total Users':int(overlap_users),
-                        'Score':score,'Appears in':1
-                    }
+                    combined_scores[brand] = {'Brand':brand,'Cities':cities,'Platform users':total_c,
+                        'Total Affinity':overlap_pct,'Total Users':int(overlap_users),'Score':score,'Appears in':1}
                 else:
                     combined_scores[brand]['Total Affinity'] += overlap_pct
                     combined_scores[brand]['Total Users'] += int(overlap_users)
@@ -483,14 +500,15 @@ elif page == "Rs.199 Recommender":
 
         if combined_scores:
             rec_df = pd.DataFrame(combined_scores.values())
-            # Boost brands that appear across multiple past campaigns
             rec_df['Score'] = rec_df['Score'] * (1 + rec_df['Appears in']*0.1)
             rec_df['Affinity %'] = (rec_df['Total Affinity']/rec_df['Appears in']).round(1)
             rec_df = rec_df.sort_values('Score', ascending=False)
         else:
             rec_df = pd.DataFrame()
+        return rec_df
 
-        # Split established vs emerging
+    with st.spinner("Analysing..."):
+        rec_df = get_recommendations(tuple(past_brands), tuple(city_scope))
         top_rec  = rec_df[rec_df['Platform users']>=3000].head(5) if len(rec_df)>0 else pd.DataFrame()
         emerging = rec_df[rec_df['Platform users']<3000].head(5) if len(rec_df)>0 else pd.DataFrame()
 
