@@ -61,37 +61,14 @@ def get_engine():
 @st.cache_data(show_spinner="Loading data...")
 def load_data():
     engine = get_engine()
-    # Load only needed columns from scored — reduces memory significantly
-    df      = pd.read_sql("""SELECT CHANNEL, DATE, MASTER_ID, BRAND_CLEAN,
-                              CATEGORY_CLEAN, CITY, AMOUNT, MONTH_NUM,
-                              MONTH_NAME, YEAR, IS_RS199, SEGMENT,
-                              CUSTOMER_NAME, OFFER_TITLE, OFFER_DESC
-                              FROM scored""", engine)
+    df      = pd.read_sql("SELECT * FROM scored",        engine)
     rfm     = pd.read_sql("SELECT * FROM rfm",           engine)
-    journey = pd.read_sql("""SELECT MASTER_ID, CHANNEL_JOURNEY, CATEGORY_JOURNEY,
-                              TOP_BRAND, TOP_CATEGORY, IS_MULTICHANNEL
-                              FROM journey""", engine)
+    journey = pd.read_sql("SELECT * FROM journey",       engine)
     bc      = pd.read_sql("SELECT * FROM brand_city",    engine)
     rs199p  = pd.read_sql("SELECT * FROM rs199_products",engine)
-    subs    = pd.read_sql("""SELECT USER_NUMBER, USER_NAME, SUBSCRIPTION_STATUS,
-                              SUBSCRIPTION_PACKAGE, TRANSACTION_TYPE,
-                              SUBSCRIPTION_START_DATE, SUBSCRIPTION_END_DATE,
-                              CITY, DEVICE_TYPE, SUBSCRIPTION_MONTH
-                              FROM subscriptions""", engine)
+    subs    = pd.read_sql("SELECT * FROM subscriptions", engine)
     aff     = pd.read_sql("SELECT * FROM brand_affinity",engine)
     df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    # Rename columns to match expected case
-    df.columns = [c.upper() if c not in ['Segment'] else c for c in df.columns]
-    df = df.rename(columns={'SEGMENT':'Segment'})
-    journey.columns = [c.upper() for c in journey.columns]
-    journey = journey.rename(columns={
-        'CHANNEL_JOURNEY':'Channel_Journey',
-        'CATEGORY_JOURNEY':'Category_Journey',
-        'TOP_BRAND':'Top_Brand',
-        'TOP_CATEGORY':'Top_Category',
-        'IS_MULTICHANNEL':'Is_Multichannel'
-    })
-    subs.columns = [c.title().replace('_',' ').replace(' ','_') for c in subs.columns]
     return df, rfm, journey, bc, rs199p, subs, aff
 
 df, rfm, journey, brand_city, rs199_prod, subs, affinity_db = load_data()
